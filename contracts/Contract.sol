@@ -109,4 +109,161 @@ contract DEX is ERC20Base {
 
         return _liquidity;
     }
+
+    /**
+     * Remove liquidity from the pool
+     * User burns their LP tokens and receives ETH + tokens back
+     *
+     * @param _amountLP - Number of LP tokens to burn
+     * @return _amountInEth - ETH returned to user
+     *
+     * Example:
+     *   Pool has: 10 ETH + 100,000 tokens, 10 LP tokens exist
+     *   User has: 2 LP tokens (20% of pool)
+     *   User burns 2 LP tokens → Gets 2 ETH + 20,000 tokens (20% of pool)
+     */
+    function removeLiquidity(uint256 _amountLP) public returns (uint256) {
+        // Must burn at least some LP tokens
+        require(
+            _amountLP > 0,
+            "Amount of liquidity to remove must be greater than 0"
+        );
+
+        // Get current reserves
+        uint _reservedEth = address(this).balance; // ETH in pool
+        uint _totalSupply = totalSupply(); // Total LP tokens in existence
+
+        // --------------------------------------------------------
+        // Calculate user's share of the pool
+        // Formula: (pool reserves × LP tokens burned) / total LP supply
+        // --------------------------------------------------------
+
+        // ETH to return = (pool ETH × LP tokens) / total LP supply
+        uint _amountInEth = (_reservedEth * _amountLP) / _totalSupply;
+
+        // Tokens to return = (pool tokens × LP tokens) / total LP supply
+        uint _amountInTokens = (getTokensInContract() * _amountLP) /
+            _totalSupply;
+
+        // Burn user's LP tokens (destroy them)
+        _burn(msg.sender, _amountLP);
+
+        // Send ETH back to user
+        payable(msg.sender).transfer(_amountInEth);
+
+        // Send tokens back to user
+        ERC20Base(token).transfer(msg.sender, _amountInTokens);
+
+        return _amountInEth;
+    }
+
+    /**
+     * ============================================================
+     * AMM PRICE FORMULA (Automated Market Maker)
+     * ============================================================
+     *
+     * This uses the "Constant Product Formula": x * y = k
+     * Where x = ETH reserve, y = token reserve, k = constant
+     *
+     * Formula: outputAmount = (inputAmount × outputReserve) / (inputReserve + inputAmount)
+     *
+     * Example:
+     *   Pool: 10 ETH + 100,000 tokens
+     *   User swaps 1 ETH
+     *   Output = (1 × 100,000) / (10 + 1) = 100,000 / 11 = ~9,090 tokens
+     *
+     * Notice: User sends 1 ETH to contract and gets 9,090 tokens, not 10,000!
+     * This is "slippage" - the price moves as you trade.
+     * Bigger trades = more slippage = worse price.
+
+     * This is just a simple supply and demand curve where:
+     * When user buys a lot of tokens:
+     * → Tokens become scarce in the pool
+     * → Price goes up (supply & demand)
+     *
+     * When user sells a lot of tokens:
+     * → Tokens become abundant in the pool
+     * → Price goes down
+     * ============================================================
+     */
+    function getAmountOfTokens(
+        uint256 inputAmount, // Amount user is swapping (ETH or tokens)
+        uint256 inputReserve, // Reserve of the input asset in pool
+        uint256 outputReserve // Reserve of the output asset in pool
+    ) public pure returns (uint256) {
+        // Pool must have both assets
+        require(inputReserve > 0 && outputReserve > 0, "Invalid Reserves");
+
+        // Fee calculation (currently disabled - 0% fee)
+        // To enable 1% fee: inputAmountWithFee = inputAmount * 99
+        // This means only 99% of input counts toward the swap
+        // uint256 inputAmountWithFee = inputAmount * 99;  // 1% fee
+        uint256 inputAmountWithFee = inputAmount; // 0% fee (no fee)
+
+        // --------------------------------------------------------
+        // AMM Formula: output = (input × outputReserve) / (inputReserve + input)
+        //
+        // We multiply by 100 in denominator to handle the fee math
+        // (when fee is enabled, input is multiplied by 99)
+        // --------------------------------------------------------
+        uint256 numerator = inputAmountWithFee * outputReserve;
+        uint256 denominator = (inputReserve * 100) + inputAmountWithFee;
+
+        unchecked {
+            return numerator / denominator;
+        }
+    }
+
+    /**
+     * Swap ETH → Tokens
+     * User sends ETH, receives "67" tokens
+     *
+     * Example:
+     *   Pool: 10 ETH + 100,000 tokens
+     *   User sends 1 ETH
+     *   User receives ~9,090 tokens (price impact/slippage)
+     */
+    function swapEthTotoken() public payable {
+        // Get current token balance in pool
+        uint256 _reservedTokens = getTokensInContract();
+
+        // Calculate how many tokens user will receive
+        // Note: address(this).balance already INCLUDES msg.value
+        // So we need to subtract msg.value for the "before" state
+        uint256 _tokensBought = getAmountOfTokens(
+            msg.value, // ETH user is swapping
+            address(this).balance - msg.value, // ETH reserve BEFORE swap
+            _reservedTokens // Token reserve
+        );
+
+        // Send tokens to user
+        ERC20Base(token).transfer(msg.sender, _tokensBought);
+    }
+
+    /**
+     * Swap Tokens → ETH
+     * User sends "67" tokens, receives ETH
+     *
+     * Example:
+     *   Pool: 10 ETH + 100,000 tokens
+     *   User sends 10,000 tokens
+     *   User receives ~0.9 ETH (price impact/slippage)
+     */
+    function swapTokenToEth(uint256 _tokensSold) public {
+        // Get current token balance in pool
+        uint256 _reservedTokens = getTokensInContract();
+
+        // Calculate how much ETH user will receive
+        uint256 ethBought = getAmountOfTokens(
+            _tokensSold, // Tokens user is swapping
+            _reservedTokens, // Token reserve
+            address(this).balance // ETH reserve
+        );
+
+        // Transfer tokens FROM user TO this contract
+        ERC20Base(token).transferFrom(msg.sender, address(this), _tokensSold);
+
+        // Send ETH to user
+        payable(msg.sender).transfer(ethBought);
+    }
 }
