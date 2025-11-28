@@ -1,5 +1,9 @@
 # 67 DEX
 
+In this project, I created my own Token, DEXLiquidity Pool. 
+<img width="868" height="198" alt="step1" src="https://github.com/user-attachments/assets/2b1d305d-9a05-42bf-99ff-3a81f11b2403" />
+<img width="1236" height="210" alt="image" src="https://github.com/user-attachments/assets/e958ee35-e2cc-4e7a-bbdb-afce07fd6388" />
+
 Warning: This code is not audited. Use at your own risk.\
 
 A decentralized exchange (DEX) smart contract built on Ethereum using Solidity.
